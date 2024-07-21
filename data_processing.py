@@ -21,7 +21,10 @@ NUMERO_PROD_POR_COMBO = 3  # Número mínimo de productos en un combo
 BUDGET = 40  # Presupuesto máximo del combo
 DESCUENTO_MAXIMO = 0.2  # Descuento máximo en el precio del combo
 
-def calcular_rentabilidad(combo):
+def crear_descuento():
+    return np.random.uniform(0.01, DESCUENTO_MAXIMO)  # Empieza en 1% como mínimo
+
+def calcular_rentabilidad(combo, descuento):
     costo_total = 0
     precio_total = 0
     popularidad_total = 0
@@ -34,15 +37,17 @@ def calcular_rentabilidad(combo):
             popularidad_total += productos[producto]['popularidad']
             num_productos += 1
     
-    # Penalizar si el costo total supera el presupuesto o si el combo tiene menos de un número mínimo de productos
     if costo_total > BUDGET or num_productos < NUMERO_PROD_POR_COMBO:
-        return 0, costo_total, precio_total, precio_total, popularidad_total, num_productos
+        return 0, costo_total, precio_total, precio_total, popularidad_total, num_productos, descuento
 
-    # Aplicar descuento al precio del combo
-    precio_total_combo = precio_total * (1 - DESCUENTO_MAXIMO)
+    precio_total_combo = precio_total * (1 - descuento)
     
-    # Rentabilidad ponderada por popularidad
-    return (precio_total_combo - costo_total) * popularidad_total, costo_total, precio_total_combo, precio_total, popularidad_total, num_productos
+    if descuento == 0:
+        return 0, costo_total, precio_total_combo, precio_total, popularidad_total, num_productos, descuento
+    
+    rentabilidad = (precio_total_combo - costo_total) * popularidad_total
+
+    return rentabilidad, costo_total, precio_total_combo, precio_total, popularidad_total, num_productos, descuento
 
 def crear_individuo():
     return np.random.randint(2, size=N_PRODUCTOS)
@@ -57,57 +62,73 @@ def mutar(individuo):
     idx = np.random.randint(0, N_PRODUCTOS)
     individuo[idx] = 1 - individuo[idx]  # Cambiar 0 a 1 o 1 a 0
 
+def mutar_descuento(descuento):
+    return np.random.uniform(0.01, DESCUENTO_MAXIMO)  # Empieza en 1% como mínimo
+
 def algoritmo_genetico():
     poblacion = [crear_individuo() for _ in range(TAMANO_POBLACION)]
-    mejor_individuo = None
-    mejor_rentabilidad = 0
-    generacion_mejor_combo = -1
-
+    descuentos = [crear_descuento() for _ in range(TAMANO_POBLACION)]
+    
     for generacion in range(NUMERO_GENERACIONES):
-        evaluaciones = [calcular_rentabilidad(ind) for ind in poblacion]
-        fitness_values, costos, precios_con_descuento, precios_sin_descuento, popularidades, num_productos = zip(*evaluaciones)
-        mejor_indice = np.argmax(fitness_values)
+        evaluaciones = [calcular_rentabilidad(ind, desc) for ind, desc in zip(poblacion, descuentos)]
+        fitness_values, costos, precios_con_descuento, precios_sin_descuento, popularidades, num_productos, descuentos_aplicados = zip(*evaluaciones)
         
-        if fitness_values[mejor_indice] > mejor_rentabilidad:
-            mejor_individuo = poblacion[mejor_indice]
-            mejor_rentabilidad = fitness_values[mejor_indice]
-            generacion_mejor_combo = generacion
+        # Filtrar descuentos válidos (no 0%)
+        indices_validos = [i for i in range(len(descuentos_aplicados)) if descuentos_aplicados[i] > 0]
+        fitness_validos = [fitness_values[i] for i in indices_validos]
+        poblacion_validas = [poblacion[i] for i in indices_validos]
+        descuentos_validos = [descuentos_aplicados[i] for i in indices_validos]
         
-        print(f"Generación {generacion+1}:")
-        print(f"  Rentabilidad mejor combo = {mejor_rentabilidad}")
-        print(f"  Costo Total = {costos[mejor_indice]}")
-        print(f"  Precio Total con Descuento = {precios_con_descuento[mejor_indice]}")
-        print(f"  Precio Total sin Descuento = {precios_sin_descuento[mejor_indice]}")
-        print(f"  Popularidad Total = {popularidades[mejor_indice]}")
-        print(f"  Número de Productos = {num_productos[mejor_indice]}")
-        print("")
+        if fitness_validos:
+            mejor_indice = np.argmax(fitness_validos)
+            mejor_individuo = poblacion_validas[mejor_indice]
+            mejor_descuento = descuentos_validos[mejor_indice]
+            mejor_rentabilidad = fitness_validos[mejor_indice]
+            
+            print(f"Generación {generacion+1}:")
+            print(f"  Rentabilidad mejor combo = {mejor_rentabilidad}")
+            print(f"  Costo Total = {costos[mejor_indice]}")
+            print(f"  Precio Total con Descuento = {precios_con_descuento[mejor_indice]}")
+            print(f"  Precio Total sin Descuento = {precios_sin_descuento[mejor_indice]}")
+            print(f"  Popularidad Total = {popularidades[mejor_indice]}")
+            print(f"  Número de Productos = {num_productos[mejor_indice]}")
+            print(f"  Descuento Aplicado = {mejor_descuento*100:.2f}%")
+            print("")
 
-        nueva_poblacion = []
-        for _ in range(TAMANO_POBLACION // 2):
-            padres_indices = np.random.choice(range(TAMANO_POBLACION), size=2, replace=False)
-            padre1, padre2 = poblacion[padres_indices[0]], poblacion[padres_indices[1]]
-            hijo1, hijo2 = crossover(padre1, padre2)
-            if np.random.rand() < PROBABILIDAD_MUTACION:
-                mutar(hijo1)
-            if np.random.rand() < PROBABILIDAD_MUTACION:
-                mutar(hijo2)
-            nueva_poblacion.extend([hijo1, hijo2])
-        poblacion = nueva_poblacion
+            nueva_poblacion = []
+            nueva_descuentos = []
+            for _ in range(TAMANO_POBLACION // 2):
+                padres_indices = np.random.choice(range(len(poblacion_validas)), size=2, replace=False)
+                padre1, padre2 = poblacion_validas[padres_indices[0]], poblacion_validas[padres_indices[1]]
+                hijo1, hijo2 = crossover(padre1, padre2)
+                
+                if np.random.rand() < PROBABILIDAD_MUTACION:
+                    mutar(hijo1)
+                if np.random.rand() < PROBABILIDAD_MUTACION:
+                    mutar(hijo2)
+                
+                nueva_poblacion.extend([hijo1, hijo2])
+                nueva_descuentos.extend([mutar_descuento(descuentos_validos[padres_indices[0]]), mutar_descuento(descuentos_validos[padres_indices[1]])])
+            
+            poblacion = nueva_poblacion
+            descuentos = nueva_descuentos
 
-    return mejor_individuo, generacion_mejor_combo
+    return mejor_individuo, mejor_descuento
 
 # Ejecución del algoritmo genético
-mejor_combo, generacion_mejor_combo = algoritmo_genetico()
+mejor_combo, mejor_descuento = algoritmo_genetico()
 
 # Obtener detalles del mejor combo
 productos_combo = [list(productos.keys())[i] for i in range(N_PRODUCTOS) if mejor_combo[i]]
 costo_total_mejor_combo = sum(productos[producto]['costo'] for producto in productos_combo)
 precio_total_sin_descuento = sum(productos[producto]['precio'] for producto in productos_combo)
-precio_total_mejor_combo = precio_total_sin_descuento * (1 - DESCUENTO_MAXIMO)
+precio_total_mejor_combo = precio_total_sin_descuento * (1 - mejor_descuento)
 beneficio_neto_mejor_combo = precio_total_mejor_combo - costo_total_mejor_combo
 
-print(f"Mejor combo encontrado en la generación {generacion_mejor_combo + 1}: {productos_combo}")
+print(f"Mejor combo encontrado:")
+print(f"  Productos: {productos_combo}")
 print(f"  Precio Total del Combo (con descuento) = {precio_total_mejor_combo:.2f} MXN")
 print(f"  Precio Total del Combo (sin descuento) = {precio_total_sin_descuento:.2f} MXN")
 print(f"  Costo de Producción Total del Combo = {costo_total_mejor_combo:.2f} MXN")
 print(f"  Beneficio Neto del Combo = {beneficio_neto_mejor_combo:.2f} MXN")
+print(f"  Porcentaje de Descuento Aplicado = {mejor_descuento*100:.2f}%")
